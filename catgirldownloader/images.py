@@ -44,24 +44,17 @@ def get_random_images(*, nsfw: bool = False, number: int = 1) -> list[ImageData]
     if nsfw:
         params["nsfw"] = "true"
 
-    logger.debug(f"{base_url=}, {params=}")
     res = requests.get(base_url, params=params)
     res.raise_for_status()
 
-    logger.debug(res.json())
     return [ImageData(**i) for i in res.json()["images"]]
 
 
 def get_random_image(*, nsfw: bool = False) -> ImageData:
     """Select a single random image from the neko image repo."""
-    while True:
-        image = get_random_images(nsfw=nsfw, number=1)[0]
-
-        if image.nsfw is nsfw:
-            logger.info(f"selected {image.id=}, {image.nsfw=}")
-            return image
-
-        logger.warning(f"selected {image.id=}, {image.nsfw=}, wrong (n)sfw status")
+    image = get_random_images(nsfw=nsfw, number=1)[0]
+    logger.info(f"selected {image.id=}, {image.nsfw=}")
+    return image
 
 
 def get_random_image_maybe_nsfw(nsfw_probability: float) -> ImageData:

@@ -21,6 +21,7 @@ CANVAS_HEIGHT = 720
 @dataclass
 class Config:
     nsfw_probability: float
+    auto_refresh_delay: float
     default_download_directory: Path
 
     @classmethod
@@ -42,15 +43,15 @@ class App(ttkb.Frame):
         self.controls_frame = ttkb.Frame(self)
 
         self.refresh_button = ttkb.Button(self.controls_frame, text="Refresh", command=self.refresh)
-        self.refresh_button.grid(row=0, column=0, **grid_kw)
+        self.refresh_button.grid(row=0, column=0, rowspan=2, **grid_kw)
 
         self.open_image_button = ttkb.Button(self.controls_frame, text="Open Image",
                                              command=self.open_image_in_system_application)
-        self.open_image_button.grid(row=0, column=1, **grid_kw)
+        self.open_image_button.grid(row=0, column=1, rowspan=2, **grid_kw)
 
         self.save_image_button = ttkb.Button(self.controls_frame, text="Save Image",
                                              command=self.save_image)
-        self.save_image_button.grid(row=0, column=2, **grid_kw)
+        self.save_image_button.grid(row=0, column=2, rowspan=2, **grid_kw)
 
         self.setvar("nsfw-probability", f"{config.nsfw_probability * 100:.0f}")
         self.nsfw_scale = ttkb.Scale(self.controls_frame, orient=ttkb.HORIZONTAL, from_=0, to=100,
@@ -60,6 +61,20 @@ class App(ttkb.Frame):
                                            text=f"P(nsfw image) = {config.nsfw_probability:.0%}")
         self.nsfw_scale_label.grid(row=0, column=3, **grid_kw)
         self.nsfw_scale.grid(row=0, column=4, **grid_kw)
+
+        self.setvar("auto-refresh-delay", f"{config.auto_refresh_delay:.1f}")
+        self.auto_refresh_scale = ttkb.Scale(self.controls_frame, orient=ttkb.HORIZONTAL, from_=0, to=10,
+                                             value=config.auto_refresh_delay,
+                                             command=self.update_auto_refresh_delay, bootstyle="info")
+        self.auto_refresh_scale_label = ttkb.Label(self.controls_frame, width=20,
+                                                   text=f"Auto Refresh (sec) = {config.auto_refresh_delay:.1f}")
+        self.auto_refresh_scale_label.grid(row=1, column=3, **grid_kw)
+        self.auto_refresh_scale.grid(row=1, column=4, **grid_kw)
+
+        if config.auto_refresh_delay != 0:
+            self._auto_refresh_func = self.after(self.current_auto_refresh_delay, self.refresh)
+        else:
+            self._auto_refresh_func = None
 
         self.controls_frame.pack()
 
@@ -101,11 +116,40 @@ class App(ttkb.Frame):
 
         return ImageTk.PhotoImage(img)
 
-    def update_nsfw_scale(self, value: str) -> None:
-        p = float(value)
+    @property
+    def current_nsfw_probability(self) -> float:
+        return float(self.getvar("nsfw-probability")) / 100.0
 
-        self.setvar("nsfw-probability", f"{p:.0f}")
-        self.nsfw_scale_label.configure(text=f"P(nsfw image) = {p / 100.0:.0%}")
+    @current_nsfw_probability.setter
+    def current_nsfw_probability(self, probability: float):
+        self.setvar("nsfw-probability", f"{probability * 100:.0f}")
+        self.nsfw_scale_label.configure(text=f"P(nsfw image) = {probability:.0%}")
+
+    def update_nsfw_scale(self, percentage_str: str) -> None:
+        self.current_nsfw_probability = float(percentage_str) / 100.0
+
+    @property
+    def current_auto_refresh_delay(self) -> int:
+        return round(float(self.getvar("auto-refresh-delay")) * 1000)
+
+    @current_auto_refresh_delay.setter
+    def current_auto_refresh_delay(self, milliseconds: float):
+        if self._auto_refresh_func is not None:
+            self.after_cancel(self._auto_refresh_func)
+            self._auto_refresh_func = None
+
+        logger.debug(f"setting auto refresh to {milliseconds / 1000:.2}s")
+        seconds = milliseconds / 1000.0
+        self.setvar("auto-refresh-delay", f"{seconds:.2f}")
+        self.auto_refresh_scale_label.configure(text=f"Auto Refresh (sec) = {seconds:.2f}")
+
+        if milliseconds != 0:
+            self._auto_refresh_func = self.after(round(milliseconds), self.refresh)
+        else:
+            self._auto_refresh_func = None
+
+    def update_auto_refresh_delay(self, seconds_str: str) -> None:
+        self.current_auto_refresh_delay = float(seconds_str) * 1000
 
     def refresh(self, _: tk.Event | None = None):
         # select a new image
@@ -123,6 +167,13 @@ class App(ttkb.Frame):
         info_components = dict(nsfw=image.nsfw, id=image.id, artist=image.artist, filename=self._filename)
         self.info_text.set("・".join(f"{k}={v}" for k, v in info_components.items()))
 
+        if self._auto_refresh_func is not None:
+            self.after_cancel(self._auto_refresh_func)
+            self._auto_refresh_func = None
+
+        if self.current_auto_refresh_delay != 0:
+            self._auto_refresh_func = self.after(self.current_auto_refresh_delay, self.refresh)
+
     def open_image_in_system_application(self, _: tk.Event | None = None) -> None:
         Image.open(self._filename).show()
 
@@ -139,6 +190,8 @@ def main():
 
     if args.verbose:
         logger.level("DEBUG")
+    else:
+        logger.level("INFO")
 
     config = Config.from_file(args.config_file)
     app = App(ttkb.Window("catgirldownloader", themename="darkly"), config=config)
