@@ -1,0 +1,149 @@
+import json
+import shutil
+import tkinter as tk
+from argparse import ArgumentParser
+from dataclasses import dataclass
+from os import PathLike
+from pathlib import Path
+from tkinter.filedialog import asksaveasfilename
+from typing import IO, Self
+
+import ttkbootstrap as ttkb
+from PIL import Image, ImageTk
+from loguru import logger
+
+import catgirldownloader
+
+CANVAS_WIDTH = 1280
+CANVAS_HEIGHT = 720
+
+
+@dataclass
+class Config:
+    nsfw_probability: float
+    default_download_directory: Path
+
+    @classmethod
+    def from_file(cls, filepath: Path) -> Self:
+        data = json.loads(filepath.read_text())
+        data["default_download_directory"] = Path(data["default_download_directory"])
+
+        return cls(**data)
+
+
+class App(ttkb.Frame):
+    def __init__(self, master, config: Config):
+        super().__init__(master)
+        self.config = config
+
+        grid_kw = dict(sticky="NSEW", padx=5, pady=5)
+
+        # set up controls panel
+        self.controls_frame = ttkb.Frame(self)
+
+        self.refresh_button = ttkb.Button(self.controls_frame, text="Refresh", command=self.refresh)
+        self.refresh_button.grid(row=0, column=0, **grid_kw)
+
+        self.open_image_button = ttkb.Button(self.controls_frame, text="Open Image",
+                                             command=self.open_image_in_system_application)
+        self.open_image_button.grid(row=0, column=1, **grid_kw)
+
+        self.save_image_button = ttkb.Button(self.controls_frame, text="Save Image",
+                                             command=self.save_image)
+        self.save_image_button.grid(row=0, column=2, **grid_kw)
+
+        self.setvar("nsfw-probability", f"{config.nsfw_probability * 100:.0f}")
+        self.nsfw_scale = ttkb.Scale(self.controls_frame, orient=ttkb.HORIZONTAL, from_=0, to=100,
+                                     value=config.nsfw_probability * 100,
+                                     command=self.update_nsfw_scale, bootstyle="danger")
+        self.nsfw_scale_label = ttkb.Label(self.controls_frame, width=20,
+                                           text=f"P(nsfw image) = {config.nsfw_probability:.0%}")
+        self.nsfw_scale_label.grid(row=0, column=3, **grid_kw)
+        self.nsfw_scale.grid(row=0, column=4, **grid_kw)
+
+        self.controls_frame.pack()
+
+        # set up info display
+        self.info_display = ttkb.Frame(self)
+        self.info_text = ttkb.StringVar(self.info_display)
+        ttkb.Label(self.info_display, textvariable=self.info_text).pack()
+        self.info_display.pack()
+
+        # set up canvas
+        self._filename = self._image = None
+        self.canvas = ttkb.Canvas(self, width=CANVAS_WIDTH, height=CANVAS_HEIGHT)
+        self.canvas.pack()
+        self.refresh()
+
+        # other
+        self.master.bind("<F5>", self.refresh)
+        self.pack()
+
+    @staticmethod
+    def load_image(fp: str | bytes | PathLike[str] | PathLike[bytes] | IO[bytes], *, max_height: int | None = None,
+                   max_width: int | None, preserve_aspect_ratio: bool = True) -> ImageTk.PhotoImage:
+        """Load the given image from file, scale it to fit within the given dimensions, and convert it to be used in tkinter.
+        If `preserve_aspect_ratio` is False, then the resulting image will be exactly the given dimensions but may be stretched or squished."""
+        img = Image.open(fp)
+
+        scales: list[float] = []
+
+        if max_height is not None:
+            scales.append(max_height / img.height)
+
+        if max_width is not None:
+            scales.append(max_width / img.width)
+
+        if scales:
+            scale = min(scales)
+            size = round(img.width * scale), round(img.height * scale)
+            img = img.resize(size)
+
+        return ImageTk.PhotoImage(img)
+
+    def update_nsfw_scale(self, value: str) -> None:
+        p = float(value)
+
+        self.setvar("nsfw-probability", f"{p:.0f}")
+        self.nsfw_scale_label.configure(text=f"P(nsfw image) = {p / 100.0:.0%}")
+
+    def refresh(self, _: tk.Event | None = None):
+        # select a new image
+        p = float(self.getvar("nsfw-probability")) / 100.0
+        image = catgirldownloader.get_random_image_maybe_nsfw(nsfw_probability=p)
+
+        # download the image
+        self._filename = image.download(dest=self.config.default_download_directory)
+
+        # place the image
+        self._image = img = self.load_image(self._filename, max_height=CANVAS_HEIGHT, max_width=CANVAS_WIDTH)
+        self.canvas.create_image(CANVAS_WIDTH // 2, CANVAS_HEIGHT // 2, anchor=ttkb.CENTER, image=img)
+
+        # update the info display
+        info_components = dict(nsfw=image.nsfw, id=image.id, artist=image.artist, filename=self._filename)
+        self.info_text.set("・".join(f"{k}={v}" for k, v in info_components.items()))
+
+    def open_image_in_system_application(self, _: tk.Event | None = None) -> None:
+        Image.open(self._filename).show()
+
+    def save_image(self, _: tk.Event | None = None) -> None:
+        dest = asksaveasfilename(defaultextension=".png", initialdir=Path.cwd(), initialfile=self._filename.name)
+        shutil.copyfile(self._filename, dest)
+
+
+def main():
+    parser = ArgumentParser()
+    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("-c", "--config-file", type=Path, default=Path(__file__).parent / "config.json")
+    args = parser.parse_args()
+
+    if args.verbose:
+        logger.level("DEBUG")
+
+    config = Config.from_file(args.config_file)
+    app = App(ttkb.Window("catgirldownloader", themename="darkly"), config=config)
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
