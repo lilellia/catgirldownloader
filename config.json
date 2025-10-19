@@ -1,5 +1,8 @@
 {
   "nsfw_probability": 0.0,
   "auto_refresh_delay": 0.0,
-  "default_download_directory": "/tmp"
+  "default_download_directory": {
+    "sfw": "/tmp",
+    "nsfw": "/tmp"
+  }
 }

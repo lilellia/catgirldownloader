@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 from tkinter.filedialog import asksaveasfilename
-from typing import IO, Self
+from typing import IO, Literal, Self
 
 import ttkbootstrap as ttkb
 from PIL import Image, ImageTk
@@ -22,12 +22,18 @@ CANVAS_HEIGHT = 720
 class Config:
     nsfw_probability: float
     auto_refresh_delay: float
-    default_download_directory: Path
+    default_download_directory: dict[Literal["sfw", "nsfw"], Path]
 
     @classmethod
     def from_file(cls, filepath: Path) -> Self:
         data = json.loads(filepath.read_text())
-        data["default_download_directory"] = Path(data["default_download_directory"])
+
+        # reinterpret the default_download_directory keys as Path objects
+        dl_dir = data["default_download_directory"]
+        data["default_download_directory"] = {
+            "sfw": Path(dl_dir["sfw"]),
+            "nsfw": Path(dl_dir["nsfw"])
+        }
 
         return cls(**data)
 
@@ -157,7 +163,8 @@ class App(ttkb.Frame):
         image = catgirldownloader.get_random_image_maybe_nsfw(nsfw_probability=p)
 
         # download the image
-        self._filename = image.download(dest=self.config.default_download_directory)
+        key = "nsfw" if image.nsfw else "sfw"
+        self._filename = image.download(dest=self.config.default_download_directory[key])
 
         # place the image
         self._image = img = self.load_image(self._filename, max_height=CANVAS_HEIGHT, max_width=CANVAS_WIDTH)
