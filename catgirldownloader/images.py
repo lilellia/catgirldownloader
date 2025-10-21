@@ -39,10 +39,10 @@ class ImageData(BaseModel):
 def get_random_images(*, nsfw: bool = False, number: int = 1) -> list[ImageData]:
     """Select a number of random images from the neko image repo. If `nsfw` is set to True, then all images will be nsfw."""
     base_url = f"https://nekos.moe/api/v1/random/image"
-    params = {"number": str(number)}
-
-    if nsfw:
-        params["nsfw"] = "true"
+    params = {
+        "number": str(number),
+        "nsfw": str(nsfw).lower(),  # "false" or "true"
+    }
 
     res = requests.get(base_url, params=params)
     res.raise_for_status()
