@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 from tkinter.filedialog import asksaveasfilename
-from typing import IO, Literal, Self
+from typing import IO, Literal, Protocol, Self
 
 import ttkbootstrap as ttkb
 from PIL import Image, ImageTk
@@ -16,6 +16,13 @@ import catgirldownloader
 
 CANVAS_WIDTH = 1280
 CANVAS_HEIGHT = 720
+
+
+class ConfigOverrideNamespace(Protocol):
+    nsfw_probability: float | None
+    auto_refresh_delay: float | None
+    nsfw_download_dir: Path | None
+    sfw_download_dir: Path | None
 
 
 @dataclass
@@ -36,6 +43,19 @@ class Config:
         }
 
         return cls(**data)
+    
+    def update_from(self, args: ConfigOverrideNamespace) -> None:
+        if (p := args.nsfw_probability) is not None:
+            self.nsfw_probability = p
+        
+        if (r := args.auto_refresh_delay) is not None:
+            self.auto_refresh_delay = r
+        
+        if (n := args.nsfw_download_dir) is not None:
+            self.default_download_directory["nsfw"] = n 
+        
+        if (s := args.sfw_download_dir) is not None:
+            self.default_download_directory["sfw"] = s
 
 
 class App(ttkb.Frame):
@@ -193,6 +213,13 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-c", "--config-file", type=Path, default=Path(__file__).parent / "config.json")
+
+    # allow command line override of config file
+    parser.add_argument("-n", "--nsfw-probability", type=float, help="the probability (0 to 1) that a chosen image will be tagged as nsfw")
+    parser.add_argument("-r", "--auto-refresh-delay", type=float, help="delay (in seconds) for auto-generation (use 0 to disable auto-generation)")
+    parser.add_argument("-N", "--nsfw-download-dir", type=Path, help="path to download nsfw images")
+    parser.add_argument("-S", "--sfw-download-dir", type=Path, help="path to download sfw images")
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -201,6 +228,7 @@ def main():
         logger.level("INFO")
 
     config = Config.from_file(args.config_file)
+    config.update_from(args)
     app = App(ttkb.Window("catgirldownloader", themename="darkly"), config=config)
     app.mainloop()
 
